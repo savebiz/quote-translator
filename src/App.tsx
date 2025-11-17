@@ -5,7 +5,7 @@ import { getRpcClient } from "thirdweb";
 import { useEffect, useState } from "react";
 import thirdwebIcon from "./thirdweb.svg";
 import { client } from "./client";
-import { SFC_CONTRACT_ABI } from "./sfc-contract-abi";
+import { QUOTA_CONTRACT_ABI } from "./quota-contract-abi";
 
 // Define the VinuChain Mainnet (Chain ID 207)
 // VinuChain Mainnet configuration
@@ -20,16 +20,17 @@ const vinuchainMainnet = defineChain({
 	// thirdweb will automatically use the best available RPC for this chain
 });
 
-// SFC Contract Address
-const STAKING_CONTRACT_ADDRESS = "0xFC00FACE00000000000000000000000000000000" as `0x${string}`;
+// Quota Contract Address (for quota calculation)
+// Source: https://vinuexplorer.org/address/0x9D6Aa03a8D4AcF7b43c562f349Ee45b3214c3bbF?tab=contract
+const QUOTA_CONTRACT_ADDRESS = "0x9D6Aa03a8D4AcF7b43c562f349Ee45b3214c3bbF" as `0x${string}`;
 
 // Get the contract object with ABI
 // Using the ABI ensures thirdweb can properly call the contract methods
 const contract = getContract({
 	client: client,
 	chain: vinuchainMainnet,
-	address: STAKING_CONTRACT_ADDRESS,
-	abi: SFC_CONTRACT_ABI,
+	address: QUOTA_CONTRACT_ADDRESS,
+	abi: QUOTA_CONTRACT_ABI,
 });
 
 export function App() {
@@ -46,7 +47,7 @@ export function App() {
 							appMetadata={{
 								name: "Quota Calculator",
 								url: typeof window !== "undefined" ? window.location.origin : "https://quote-translator.app",
-								description: "Calculate your feeless quota based on your VinuChain staking data",
+								description: "Calculate your feeless quota based on your VinuChain quota data",
 							}}
 							connectModal={{
 								size: "wide",
@@ -100,7 +101,7 @@ function Header() {
 			</h1>
 
 			<p className="text-zinc-300 text-base">
-				Calculate your feeless quota based on your VinuChain staking data
+				Calculate your feeless quota based on your VinuChain quota data
 			</p>
 		</header>
 	);
@@ -140,41 +141,42 @@ function SFCContractInfo() {
 	const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 	const [chainMismatch, setChainMismatch] = useState(false);
 
-	// Call the 'delegations' function and pass the user's wallet address
-	// Note: This function may revert if the address has no staking
-	// We'll handle that case by treating it as 0 staking
-	const { 
-		data: stakingData, 
-		isLoading: isStakingDataLoading,
-		error: contractError
-	} = useReadContract({
-		contract: contract,
-		method: "delegations", // Function name only - thirdweb will infer signature from ABI
-		params: [walletAddress as `0x${string}`],
+		// Call the quota function and pass the user's wallet address
+		// Using getStake function from the quota contract
+		// Note: This function may revert if the address has no quota
+		// We'll handle that case by treating it as 0 quota
+		const { 
+			data: quotaData, 
+			isLoading: isQuotaDataLoading,
+			error: contractError
+		} = useReadContract({
+			contract: contract,
+			method: "getStake",
+			params: [walletAddress as `0x${string}`],
 		queryOptions: {
 			enabled: !chainMismatch && !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
-			retry: 0, // Don't retry - if it reverts, we'll handle it as no staking
+			retry: 0, // Don't retry - if it reverts, we'll handle it as no quota
 		},
 	});
 
-	// Check if error is due to no staking (execution reverted) vs other errors
-	const isNoStakingError = contractError && 
+	// Check if error is due to no quota (execution reverted) vs other errors
+	const isNoQuotaError = contractError && 
 		(String(contractError).includes("execution reverted") || 
 		 String(contractError).includes("revert") ||
-		 String(contractError).toLowerCase().includes("no staking"));
+		 String(contractError).toLowerCase().includes("no quota"));
 
-	// Log errors for debugging
-	useEffect(() => {
-		if (contractError) {
-			console.error("Contract call error:", contractError);
-			console.error("Error details:", {
-				contractAddress: STAKING_CONTRACT_ADDRESS,
-				method: "delegations",
-				params: [walletAddress],
-				chainId: 207,
-			});
-		}
-	}, [contractError, walletAddress]);
+		// Log errors for debugging
+		useEffect(() => {
+			if (contractError) {
+				console.error("Contract call error:", contractError);
+				console.error("Error details:", {
+					contractAddress: QUOTA_CONTRACT_ADDRESS,
+					method: "getStake",
+					params: [walletAddress],
+					chainId: 207,
+				});
+			}
+		}, [contractError, walletAddress]);
 
 	// Check if wallet is on correct chain (if chain info is available)
 	useEffect(() => {
@@ -284,8 +286,8 @@ function SFCContractInfo() {
 					</div>
 				)}
 
-				{/* Error Handling - Show different messages for no staking vs other errors */}
-				{contractError && !isNoStakingError && (
+				{/* Error Handling - Show different messages for no quota vs other errors */}
+				{contractError && !isNoQuotaError && (
 					<div className="p-4 bg-red-900/20 border border-red-800 rounded-lg">
 						<p className="text-red-400 text-sm font-semibold mb-1">⚠️ Error Loading Contract Data</p>
 						<p className="text-red-300 text-xs font-mono break-all">
@@ -322,15 +324,15 @@ function SFCContractInfo() {
 					</div>
 				)}
 
-				{/* No Staking Message - Treat revert as no staking */}
-				{isNoStakingError && (
+				{/* No Quota Message - Treat revert as no quota */}
+				{isNoQuotaError && (
 					<div className="p-4 bg-blue-900/20 border border-blue-800 rounded-lg">
-						<p className="text-blue-400 text-sm font-semibold mb-1">ℹ️ No Staking Found</p>
+						<p className="text-blue-400 text-sm font-semibold mb-1">ℹ️ No Quota Found</p>
 						<p className="text-blue-300 text-xs">
-							This wallet address doesn't have any staking on VinuChain Mainnet.
+							This wallet address doesn't have any quota on VinuChain Mainnet.
 						</p>
 						<p className="text-blue-400/70 text-xs mt-2">
-							To use feeless transactions, you need to stake VC tokens on VinuChain.
+							To use feeless transactions, you need to have quota available on VinuChain.
 						</p>
 					</div>
 				)}
@@ -339,14 +341,14 @@ function SFCContractInfo() {
 				{!contractError && (
 					<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
 						<p className="text-xs text-zinc-500 mb-2 uppercase tracking-wide">Raw Contract Result</p>
-						{isStakingDataLoading ? (
+						{isQuotaDataLoading ? (
 							<div className="flex items-center gap-2">
 								<div className="animate-spin rounded-full h-4 w-4 border-b-2 border-violet-400"></div>
-								<p className="text-zinc-400 text-sm">Loading your staking data from VinuChain...</p>
+								<p className="text-zinc-400 text-sm">Loading your quota data from VinuChain...</p>
 							</div>
-						) : stakingData !== undefined ? (
+						) : quotaData !== undefined ? (
 							<p className="text-zinc-200 font-mono text-sm break-all bg-zinc-900/50 p-3 rounded border border-zinc-700">
-								{String(stakingData)}
+								{String(quotaData)}
 							</p>
 						) : (
 							<p className="text-zinc-400 text-sm">No result available</p>
@@ -355,16 +357,16 @@ function SFCContractInfo() {
 				)}
 
 				{/* Feeless Trades Available Section */}
-				{(!contractError || isNoStakingError) && (stakingData !== undefined || isNoStakingError) && (() => {
-					// If no staking error, treat as 0 staking
-					const actualStakingData = isNoStakingError ? 0n : stakingData;
+				{(!contractError || isNoQuotaError) && (quotaData !== undefined || isNoQuotaError) && (() => {
+					// If no quota error, treat as 0 quota
+					const actualQuotaData = isNoQuotaError ? 0n : quotaData;
 					// Calculate quota (raw result / 1000)
-					// If no staking, quota is 0
-					const quota = typeof actualStakingData === "bigint" 
-						? Number(actualStakingData) / 1000
-						: typeof actualStakingData === "number"
-						? actualStakingData / 1000
-						: Number(actualStakingData || 0) / 1000;
+					// If no quota, quota is 0
+					const quota = typeof actualQuotaData === "bigint" 
+						? Number(actualQuotaData) / 1000
+						: typeof actualQuotaData === "number"
+						? actualQuotaData / 1000
+						: Number(actualQuotaData || 0) / 1000;
 
 					// Typical gas limits for different transaction types on VinuChain
 					// These are estimates and may vary based on actual transaction complexity
@@ -411,7 +413,7 @@ function SFCContractInfo() {
 									})}
 								</p>
 								<p className="text-zinc-500 text-xs mt-2">
-									Based on your staking data divided by 1000
+									Based on your quota data divided by 1000
 								</p>
 							</div>
 
