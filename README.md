@@ -1,6 +1,6 @@
-# Quote Translator ⚡ VinuChain
+# Quota Calculator ⚡ VinuChain
 
-Quote Translator is a dynamic quota calculator for VinuChain that translates abstract staking quota numbers into tangible, human-readable actions. It provides real-time estimates of feeless transactions available based on current network gas prices.
+Quota Calculator is a dynamic quota calculator for VinuChain that translates abstract staking quota numbers into tangible, human-readable actions. It provides real-time estimates of feeless transactions available based on current network gas prices.
 
 ## Features 
 

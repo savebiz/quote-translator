@@ -44,7 +44,7 @@ export function App() {
 							client={client}
 							chains={[vinuchainMainnet]}
 							appMetadata={{
-								name: "Quote Translator",
+								name: "Quota Calculator",
 								url: typeof window !== "undefined" ? window.location.origin : "https://quote-translator.app",
 								description: "Calculate your feeless quota based on your VinuChain staking data",
 							}}
@@ -94,7 +94,7 @@ function Header() {
 			/>
 
 			<h1 className="text-2xl md:text-6xl font-bold tracking-tighter mb-6 text-zinc-100">
-				Quote Translator
+				Quota Calculator
 				<span className="text-zinc-300 inline-block mx-1"> ⚡ </span>
 				<span className="inline-block -skew-x-6 text-violet-500"> VinuChain </span>
 			</h1>

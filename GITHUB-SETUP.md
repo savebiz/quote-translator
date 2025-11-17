@@ -16,7 +16,7 @@
 
 2. **Create New Repository**:
    - Repository name: `quote-translator` (or your preferred name)
-   - Description: "Quote Translator - VinuChain Feeless Quota Calculator"
+   - Description: "Quota Calculator - VinuChain Feeless Quota Calculator"
    - Visibility: Choose Public or Private
    - **DO NOT** initialize with README, .gitignore, or license (we already have these)
    - Click "Create repository"
