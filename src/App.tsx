@@ -46,10 +46,18 @@ export function App() {
 							appMetadata={{
 								name: "Quote Translator",
 								url: typeof window !== "undefined" ? window.location.origin : "https://quote-translator.app",
+								description: "Calculate your feeless quota based on your VinuChain staking data",
 							}}
 							connectModal={{
 								size: "wide",
+								title: "Connect Wallet",
+								titleIcon: undefined,
 							}}
+							connectButton={{
+								label: "Connect Wallet",
+							}}
+							// Enable all wallet options including mobile wallets
+							recommendedWallets={[]}
 						/>
 					</div>
 
@@ -144,6 +152,7 @@ function SFCContractInfo() {
 		params: [walletAddress as `0x${string}`],
 		queryOptions: {
 			enabled: !chainMismatch && !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
+			retry: 1, // Retry once on failure
 		},
 	});
 
