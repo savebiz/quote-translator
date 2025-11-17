@@ -56,7 +56,7 @@ export function App() {
 							connectButton={{
 								label: "Connect Wallet",
 							}}
-							// Enable all wallet options including mobile wallets
+							// Don't show recommended wallets, let user choose their preferred wallet
 							recommendedWallets={[]}
 						/>
 					</div>

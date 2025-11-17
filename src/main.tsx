@@ -6,15 +6,7 @@ import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThirdwebProvider
-      // Enable mobile wallet support and better connection handling
-      options={{
-        // Enable wallet connection persistence
-        walletConnection: {
-          persist: true,
-        },
-      }}
-    >
+    <ThirdwebProvider>
       <App />
     </ThirdwebProvider>
   </React.StrictMode>
