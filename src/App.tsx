@@ -141,20 +141,27 @@ function SFCContractInfo() {
 	const [chainMismatch, setChainMismatch] = useState(false);
 
 	// Call the 'delegations' function and pass the user's wallet address
-	// The method format for thirdweb v5 can be just the function name
+	// Note: This function may revert if the address has no staking
+	// We'll handle that case by treating it as 0 staking
 	const { 
 		data: stakingData, 
 		isLoading: isStakingDataLoading,
 		error: contractError
 	} = useReadContract({
 		contract: contract,
-		method: "delegations", // Function name only - thirdweb will infer signature
+		method: "delegations", // Function name only - thirdweb will infer signature from ABI
 		params: [walletAddress as `0x${string}`],
 		queryOptions: {
 			enabled: !chainMismatch && !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
-			retry: 1, // Retry once on failure
+			retry: 0, // Don't retry - if it reverts, we'll handle it as no staking
 		},
 	});
+
+	// Check if error is due to no staking (execution reverted) vs other errors
+	const isNoStakingError = contractError && 
+		(String(contractError).includes("execution reverted") || 
+		 String(contractError).includes("revert") ||
+		 String(contractError).toLowerCase().includes("no staking"));
 
 	// Log errors for debugging
 	useEffect(() => {
@@ -277,8 +284,8 @@ function SFCContractInfo() {
 					</div>
 				)}
 
-				{/* Error Handling */}
-				{contractError && (
+				{/* Error Handling - Show different messages for no staking vs other errors */}
+				{contractError && !isNoStakingError && (
 					<div className="p-4 bg-red-900/20 border border-red-800 rounded-lg">
 						<p className="text-red-400 text-sm font-semibold mb-1">⚠️ Error Loading Contract Data</p>
 						<p className="text-red-300 text-xs font-mono break-all">
@@ -315,6 +322,19 @@ function SFCContractInfo() {
 					</div>
 				)}
 
+				{/* No Staking Message - Treat revert as no staking */}
+				{isNoStakingError && (
+					<div className="p-4 bg-blue-900/20 border border-blue-800 rounded-lg">
+						<p className="text-blue-400 text-sm font-semibold mb-1">ℹ️ No Staking Found</p>
+						<p className="text-blue-300 text-xs">
+							This wallet address doesn't have any staking on VinuChain Mainnet.
+						</p>
+						<p className="text-blue-400/70 text-xs mt-2">
+							To use feeless transactions, you need to stake VC tokens on VinuChain.
+						</p>
+					</div>
+				)}
+
 				{/* Raw Result Section */}
 				{!contractError && (
 					<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
@@ -335,13 +355,16 @@ function SFCContractInfo() {
 				)}
 
 				{/* Feeless Trades Available Section */}
-				{!contractError && stakingData !== undefined && (() => {
+				{(!contractError || isNoStakingError) && (stakingData !== undefined || isNoStakingError) && (() => {
+					// If no staking error, treat as 0 staking
+					const actualStakingData = isNoStakingError ? 0n : stakingData;
 					// Calculate quota (raw result / 1000)
-					const quota = typeof stakingData === "bigint" 
-						? Number(stakingData) / 1000
-						: typeof stakingData === "number"
-						? stakingData / 1000
-						: Number(stakingData || 0) / 1000;
+					// If no staking, quota is 0
+					const quota = typeof actualStakingData === "bigint" 
+						? Number(actualStakingData) / 1000
+						: typeof actualStakingData === "number"
+						? actualStakingData / 1000
+						: Number(actualStakingData || 0) / 1000;
 
 					// Typical gas limits for different transaction types on VinuChain
 					// These are estimates and may vary based on actual transaction complexity
