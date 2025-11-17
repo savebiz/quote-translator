@@ -7,7 +7,17 @@ import thirdwebIcon from "./thirdweb.svg";
 import { client } from "./client";
 
 // Define the VinuChain Mainnet (Chain ID 207)
-const vinuchainMainnet = defineChain(207);
+// VinuChain Mainnet configuration
+const vinuchainMainnet = defineChain({
+	id: 207,
+	name: "VinuChain Mainnet",
+	nativeCurrency: {
+		name: "VinuChain Coin",
+		symbol: "VC",
+		decimals: 18,
+	},
+	// thirdweb will automatically use the best available RPC for this chain
+});
 
 // SFC Contract Address
 const STAKING_CONTRACT_ADDRESS = "0xFC00FACE00000000000000000000000000000000" as `0x${string}`;
@@ -33,6 +43,9 @@ export function App() {
 							appMetadata={{
 								name: "Quote Translator",
 								url: typeof window !== "undefined" ? window.location.origin : "https://quote-translator.app",
+							}}
+							connectModal={{
+								size: "wide",
 							}}
 						/>
 					</div>
@@ -114,6 +127,7 @@ function SFCContractInfo() {
 	const [gasPrice, setGasPrice] = useState<bigint | null>(null);
 	const [gasPriceError, setGasPriceError] = useState<string | null>(null);
 	const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+	const [chainMismatch, setChainMismatch] = useState(false);
 
 	// Call the 'delegations' function and pass the user's wallet address
 	const { 
@@ -124,7 +138,17 @@ function SFCContractInfo() {
 		contract: contract,
 		method: "function delegations(address)",
 		params: [walletAddress as `0x${string}`],
+		queryOptions: {
+			enabled: !chainMismatch && !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
+		},
 	});
+
+	// Check if wallet is on correct chain (if chain info is available)
+	useEffect(() => {
+		// Note: thirdweb's useActiveAccount doesn't always expose chain info
+		// We'll rely on the contract error to detect chain mismatches
+		setChainMismatch(false); // Reset, will be set by error handling if needed
+	}, [account]);
 
 	// Fetch current gas price from VinuChain network
 	useEffect(() => {
@@ -205,17 +229,62 @@ function SFCContractInfo() {
 					</p>
 				</div>
 
+				{/* Chain Mismatch Warning - Show if error suggests wrong network */}
+				{contractError && typeof contractError === "object" && 
+				 (String(contractError).includes("network") || 
+				  String(contractError).includes("chain") ||
+				  String(contractError).includes("207")) && (
+					<div className="p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg mb-4">
+						<p className="text-yellow-400 text-sm font-semibold mb-1">⚠️ Network Configuration Issue</p>
+						<p className="text-yellow-400/70 text-xs">
+							Please ensure you're connected to <strong>VinuChain Mainnet (Chain ID: 207)</strong>.
+						</p>
+						<p className="text-yellow-400/50 text-xs mt-2">
+							If using a mobile wallet (like SafePal), you may need to add VinuChain Mainnet manually:
+						</p>
+						<ul className="text-yellow-400/50 text-xs mt-1 ml-4 list-disc">
+							<li>Network Name: VinuChain Mainnet</li>
+							<li>Chain ID: 207</li>
+							<li>Currency Symbol: VC</li>
+							<li>RPC URL: Check VinuChain documentation for official RPC endpoint</li>
+						</ul>
+					</div>
+				)}
+
 				{/* Error Handling */}
 				{contractError && (
 					<div className="p-4 bg-red-900/20 border border-red-800 rounded-lg">
 						<p className="text-red-400 text-sm font-semibold mb-1">⚠️ Error Loading Contract Data</p>
-						<p className="text-red-300 text-xs">
-							{contractError instanceof Error 
-								? contractError.message 
-								: String(contractError)}
+						<p className="text-red-300 text-xs font-mono break-all">
+							{(() => {
+								if (contractError instanceof Error) {
+									return contractError.message || contractError.toString();
+								}
+								if (typeof contractError === "object") {
+									try {
+										const errorStr = JSON.stringify(contractError, Object.getOwnPropertyNames(contractError), 2);
+										// Try to extract meaningful error message
+										if (errorStr.includes("message")) {
+											const parsed = JSON.parse(errorStr);
+											return parsed.message || errorStr;
+										}
+										return errorStr;
+									} catch {
+										// If JSON.stringify fails, try to get error properties
+										if ("message" in contractError) {
+											return String((contractError as any).message);
+										}
+										return String(contractError);
+									}
+								}
+								return String(contractError);
+							})()}
 						</p>
 						<p className="text-red-400/70 text-xs mt-2">
-							Please ensure you're connected to VinuChain Mainnet and try again.
+							Please ensure you're connected to VinuChain Mainnet (Chain ID: 207) and try again.
+						</p>
+						<p className="text-red-400/50 text-xs mt-1">
+							If the error persists, check the browser console for more details.
 						</p>
 					</div>
 				)}
