@@ -5,6 +5,7 @@ import { getRpcClient } from "thirdweb";
 import { useEffect, useState } from "react";
 import thirdwebIcon from "./thirdweb.svg";
 import { client } from "./client";
+import { SFC_CONTRACT_ABI } from "./sfc-contract-abi";
 
 // Define the VinuChain Mainnet (Chain ID 207)
 // VinuChain Mainnet configuration
@@ -22,11 +23,13 @@ const vinuchainMainnet = defineChain({
 // SFC Contract Address
 const STAKING_CONTRACT_ADDRESS = "0xFC00FACE00000000000000000000000000000000" as `0x${string}`;
 
-// Get the contract object
+// Get the contract object with ABI
+// Using the ABI ensures thirdweb can properly call the contract methods
 const contract = getContract({
 	client: client,
 	chain: vinuchainMainnet,
 	address: STAKING_CONTRACT_ADDRESS,
+	abi: SFC_CONTRACT_ABI,
 });
 
 export function App() {
@@ -130,18 +133,32 @@ function SFCContractInfo() {
 	const [chainMismatch, setChainMismatch] = useState(false);
 
 	// Call the 'delegations' function and pass the user's wallet address
+	// The method format for thirdweb v5 can be just the function name
 	const { 
 		data: stakingData, 
 		isLoading: isStakingDataLoading,
 		error: contractError
 	} = useReadContract({
 		contract: contract,
-		method: "function delegations(address)",
+		method: "delegations", // Function name only - thirdweb will infer signature
 		params: [walletAddress as `0x${string}`],
 		queryOptions: {
 			enabled: !chainMismatch && !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
 		},
 	});
+
+	// Log errors for debugging
+	useEffect(() => {
+		if (contractError) {
+			console.error("Contract call error:", contractError);
+			console.error("Error details:", {
+				contractAddress: STAKING_CONTRACT_ADDRESS,
+				method: "delegations",
+				params: [walletAddress],
+				chainId: 207,
+			});
+		}
+	}, [contractError, walletAddress]);
 
 	// Check if wallet is on correct chain (if chain info is available)
 	useEffect(() => {
