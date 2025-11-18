@@ -184,18 +184,20 @@ function QuotaCalculator() {
 
 	// FIXED: Get staked amount using getStake with BOTH address and validator ID
 	// Validator ID 0 is typically used for the Payback contract
+	const validatorId = 0n;
+
 	const { 
-		data: stakedAmount, 
-		isLoading: isStakeLoading,
-		error: contractError
+	data: stakedAmount, 
+	isLoading: isStakeLoading,
+	error: contractError
 	} = useReadContract({
-		contract: contract,
-		method: "getStake",
-		params: [walletAddress, 0n] as const,
-		queryOptions: {
+	contract: contract,
+	method: "getStake",
+	params: [walletAddress, validatorId],
+	queryOptions: {
 		enabled: !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
 		retry: 0,
-		},
+	},
 	});
 
 	const isNoStakeError = Boolean(contractError) && 
