@@ -18,7 +18,7 @@ const vinuchainMainnet = defineChain({
 	},
 });
 
-// Quota Contract Address
+// Quota Contract Address (SFC Contract for staking data)
 const QUOTA_CONTRACT_ADDRESS = "0x9D6Aa03a8D4AcF7b43c562f349Ee45b3214c3bbF" as `0x${string}`;
 
 const contract = getContract({
@@ -182,7 +182,8 @@ function QuotaCalculator() {
 	const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 	const [blockNumber, setBlockNumber] = useState<number | null>(null);
 
-	// Get staked amount using getStake
+	// FIXED: Get staked amount using getStake with BOTH address and validator ID
+	// Validator ID 0 is typically used for the Payback contract
 	const { 
 		data: stakedAmount, 
 		isLoading: isStakeLoading,
@@ -190,14 +191,17 @@ function QuotaCalculator() {
 	} = useReadContract({
 		contract: contract,
 		method: "getStake",
-		params: [walletAddress as `0x${string}`],
+		params: [
+			walletAddress as `0x${string}`,
+			0n  // Validator ID - 0 for Payback contract
+		],
 		queryOptions: {
 			enabled: !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
 			retry: 0,
 		},
 	});
 
-	const isNoStakeError = contractError && 
+	const isNoStakeError = Boolean(contractError) && 
 		(String(contractError).includes("execution reverted") || 
 		 String(contractError).includes("revert"));
 
@@ -241,6 +245,9 @@ function QuotaCalculator() {
 	
 	const utps = calculateUTPS(calculatedQuota);
 	const availableTransactions = calculateAvailableTransactions(calculatedQuota);
+	
+	// Helper to check if there's a contract error (not a revert/no stake)
+	const hasContractError = Boolean(contractError) && !isNoStakeError;
 
 	// Format functions
 	const formatAddress = (address: string) => {
@@ -269,7 +276,7 @@ function QuotaCalculator() {
 			<div className="p-4 bg-blue-900/20 border border-blue-800 rounded-lg">
 				<p className="text-blue-400 text-sm font-semibold mb-1">💡 How This Works</p>
 				<p className="text-blue-300/80 text-xs">
-					Since the contract only provides <code className="text-blue-200">getStake()</code>, we're calculating your quota 
+					We fetch your staked amount using <code className="text-blue-200">getStake(address, validatorID)</code> and calculate quota 
 					using the VinuChain formula: <strong>Qi = M × (1 - 2 / (1 + e^(Li × ξi × ρ)))</strong>
 				</p>
 				<p className="text-blue-300/70 text-xs mt-2">
@@ -330,27 +337,33 @@ function QuotaCalculator() {
 					) : null}
 
 					{/* Error Handling */}
-					{!!contractError && !isNoStakeError ? (
+					{hasContractError ? (
 						<div className="p-4 bg-red-900/20 border border-red-800 rounded-lg">
 							<p className="text-red-400 text-sm font-semibold mb-1">⚠️ Error Loading Stake Data</p>
 							<p className="text-red-300 text-xs">
 								{String(contractError)}
 							</p>
+							<p className="text-red-400/70 text-xs mt-2">
+								Make sure you're connected to VinuChain Mainnet (Chain ID: 207)
+							</p>
 						</div>
 					) : null}
 
 					{/* No Stake Message */}
-					{(isNoStakeError || (!isStakeLoading && (stakedAmount === undefined || stakedAmount === null || (typeof stakedAmount === "bigint" && stakedAmount === 0n)))) && (
+					{(isNoStakeError || (!isStakeLoading && (stakedAmount === undefined || stakedAmount === null || (typeof stakedAmount === "bigint" && stakedAmount === 0n)))) ? (
 						<div className="p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg">
 							<p className="text-yellow-400 text-sm font-semibold mb-1">ℹ️ No Stake Found</p>
 							<p className="text-yellow-300 text-xs">
-								This wallet doesn't have any VC staked. Stake VC to get quota for feeless transactions.
+								This wallet doesn't have any VC staked on validator ID 0. Stake VC to get quota for feeless transactions.
+							</p>
+							<p className="text-yellow-400/70 text-xs mt-2">
+								To stake: Visit VinuChain's staking platform and delegate to a validator.
 							</p>
 						</div>
-					)}
+					) : null}
 
 					{/* Staked Amount Display */}
-					{!contractError && hasStake && (
+					{!contractError && hasStake ? (
 						<>
 							<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
 								<p className="text-xs text-zinc-500 mb-2 uppercase tracking-wide">Your Staked Amount</p>
@@ -366,6 +379,9 @@ function QuotaCalculator() {
 										</p>
 										<p className="text-zinc-500 text-xs mt-1">
 											Raw: {String(stakedAmount)} wei
+										</p>
+										<p className="text-zinc-600 text-xs mt-1">
+											Validator ID: 0 (Payback Contract)
 										</p>
 									</div>
 								)}
@@ -480,7 +496,7 @@ function QuotaCalculator() {
 								</div>
 							</div>
 						</>
-					)}
+					) : null}
 				</div>
 			</div>
 		</div>
