@@ -7,7 +7,6 @@ import thirdwebIcon from "./thirdweb.svg";
 import { client } from "./client";
 import { QUOTA_CONTRACT_ABI } from "./quota-contract-abi";
 
-// Define the VinuChain Mainnet (Chain ID 207)
 // VinuChain Mainnet configuration
 const vinuchainMainnet = defineChain({
 	id: 207,
@@ -17,21 +16,88 @@ const vinuchainMainnet = defineChain({
 		symbol: "VC",
 		decimals: 18,
 	},
-	// thirdweb will automatically use the best available RPC for this chain
 });
 
-// Quota Contract Address (for quota calculation)
-// Source: https://vinuexplorer.org/address/0x9D6Aa03a8D4AcF7b43c562f349Ee45b3214c3bbF?tab=contract
+// Quota Contract Address
 const QUOTA_CONTRACT_ADDRESS = "0x9D6Aa03a8D4AcF7b43c562f349Ee45b3214c3bbF" as `0x${string}`;
 
-// Get the contract object with ABI
-// Using the ABI ensures thirdweb can properly call the contract methods
 const contract = getContract({
 	client: client,
 	chain: vinuchainMainnet,
 	address: QUOTA_CONTRACT_ADDRESS,
 	abi: QUOTA_CONTRACT_ABI,
 });
+
+// VinuChain Quota System Constants
+const M = 1000000; // Maximum quota
+const RHO = 3.13478991e-22; // ρ constant
+const QUOTA_REFRESH_BLOCKS = 75; // Rolling window of 75 blocks
+
+// Calculate network load parameter Li(gi)
+// This is a simplified approximation - actual calculation requires blockchain state
+function calculateNetworkLoadParameter(avgQuotaUsed: number): number {
+	// Based on the whitepaper table, we can approximate Li(gi)
+	// For low congestion (0-50 UT): Li ≈ 1
+	// For medium congestion (51-100 UT): Li ≈ 0.8-0.95
+	// For high congestion (100+ UT): Li decreases further
+	
+	if (avgQuotaUsed <= 50) return 1.0;
+	if (avgQuotaUsed <= 100) return 0.9;
+	if (avgQuotaUsed <= 150) return 0.8;
+	if (avgQuotaUsed <= 200) return 0.7;
+	if (avgQuotaUsed <= 250) return 0.6;
+	if (avgQuotaUsed <= 300) return 0.5;
+	if (avgQuotaUsed <= 400) return 0.4;
+	if (avgQuotaUsed <= 500) return 0.3;
+	return 0.2; // Very high congestion
+}
+
+// Calculate quota based on staked amount and network conditions
+// Formula: Qi(gi, ξi) = M × (1 - 2 / (1 + e^(Li(gi) × ξi × ρ)))
+function calculateQuotaFromStake(
+	stakedAmountWei: bigint,
+	networkLoad: number = 50 // Default to low congestion
+): number {
+	// Convert staked amount from wei to VC
+	const stakedVC = Number(stakedAmountWei) / 1e18;
+	
+	if (stakedVC === 0) return 0;
+	
+	// Calculate network load parameter
+	const Li = calculateNetworkLoadParameter(networkLoad);
+	
+	// Calculate quota using the exponential formula
+	const exponent = Li * stakedVC * RHO;
+	const quotaPerBlock = M * (1 - 2 / (1 + Math.exp(exponent)));
+	
+	// Total quota over 75 blocks (UTPE)
+	const totalQuota = quotaPerBlock * QUOTA_REFRESH_BLOCKS;
+	
+	return totalQuota;
+}
+
+// Calculate UTPS (Unit Transactions Per Second) from quota
+function calculateUTPS(quota: number): number {
+	return quota / (21000 * QUOTA_REFRESH_BLOCKS);
+}
+
+// Calculate how many transactions of each type are available
+function calculateAvailableTransactions(quota: number) {
+	// Transaction costs in quota units (from whitepaper Section 5.6)
+	const SIMPLE_TRANSFER = 21000;
+	const SMART_CONTRACT_CREATE = 41825;
+	const STAKE_QUOTA = 104166;
+	const SWAP_ESTIMATE = 150000; // Approximate for DEX swap
+	const NFT_MINT_ESTIMATE = 150000; // Approximate for NFT mint
+	
+	return {
+		simpleTransfers: Math.floor(quota / SIMPLE_TRANSFER),
+		contractCreations: Math.floor(quota / SMART_CONTRACT_CREATE),
+		stakeOperations: Math.floor(quota / STAKE_QUOTA),
+		swaps: Math.floor(quota / SWAP_ESTIMATE),
+		nftMints: Math.floor(quota / NFT_MINT_ESTIMATE),
+	};
+}
 
 export function App() {
 	try {
@@ -46,8 +112,8 @@ export function App() {
 							chains={[vinuchainMainnet]}
 							appMetadata={{
 								name: "Quota Calculator",
-								url: typeof window !== "undefined" ? window.location.origin : "https://quote-translator.app",
-								description: "Calculate your feeless quota based on your VinuChain quota data",
+								url: typeof window !== "undefined" ? window.location.origin : "https://quota-calculator.app",
+								description: "Calculate your feeless quota based on VinuChain staking",
 							}}
 							connectModal={{
 								size: "wide",
@@ -57,12 +123,11 @@ export function App() {
 							connectButton={{
 								label: "Connect Wallet",
 							}}
-							// Don't show recommended wallets, let user choose their preferred wallet
 							recommendedWallets={[]}
 						/>
 					</div>
 
-					<SFCContractInfo />
+					<QuotaCalculator />
 
 					<ThirdwebResources />
 				</div>
@@ -101,9 +166,340 @@ function Header() {
 			</h1>
 
 			<p className="text-zinc-300 text-base">
-				Calculate your feeless quota based on your VinuChain quota data
+				Calculate your feeless quota based on your VinuChain staking (Dynamic Formula)
 			</p>
 		</header>
+	);
+}
+
+function QuotaCalculator() {
+	const account = useActiveAccount();
+	const walletAddress = account?.address || "0x0000000000000000000000000000000000000000";
+	
+	// State for network conditions and gas price
+	const [networkLoad, setNetworkLoad] = useState<number>(50); // Default to low congestion
+	const [gasPrice, setGasPrice] = useState<bigint | null>(null);
+	const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+	const [blockNumber, setBlockNumber] = useState<number | null>(null);
+
+	// Get staked amount using getStake
+	const { 
+		data: stakedAmount, 
+		isLoading: isStakeLoading,
+		error: contractError
+	} = useReadContract({
+		contract: contract,
+		method: "getStake",
+		params: [walletAddress as `0x${string}`],
+		queryOptions: {
+			enabled: !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
+			retry: 0,
+		},
+	});
+
+	const isNoStakeError = contractError && 
+		(String(contractError).includes("execution reverted") || 
+		 String(contractError).includes("revert"));
+
+	// Fetch current gas price and block number
+	useEffect(() => {
+		const fetchNetworkData = async () => {
+			if (!account) return;
+
+			try {
+				const rpcClient = getRpcClient({ chain: vinuchainMainnet, client });
+				
+				// Get gas price
+				const price = await rpcClient({
+					method: "eth_gasPrice",
+				} as any);
+				const priceBigInt = BigInt(price as string);
+				setGasPrice(priceBigInt);
+				
+				// Get current block number
+				const blockNum = await rpcClient({
+					method: "eth_blockNumber",
+				} as any);
+				setBlockNumber(parseInt(blockNum as string, 16));
+				
+				setLastUpdate(new Date());
+			} catch (error) {
+				console.error("Error fetching network data:", error);
+			}
+		};
+
+		fetchNetworkData();
+		const interval = setInterval(fetchNetworkData, 30000);
+		return () => clearInterval(interval);
+	}, [account]);
+
+	// Calculate quota dynamically
+	const hasStake = stakedAmount && (typeof stakedAmount === "bigint" ? stakedAmount > 0n : Boolean(stakedAmount));
+	const calculatedQuota = hasStake
+		? calculateQuotaFromStake(stakedAmount as bigint, networkLoad)
+		: 0;
+	
+	const utps = calculateUTPS(calculatedQuota);
+	const availableTransactions = calculateAvailableTransactions(calculatedQuota);
+
+	// Format functions
+	const formatAddress = (address: string) => {
+		if (!address || address === "0x0000000000000000000000000000000000000000") return "Not connected";
+		return `${address.slice(0, 6)}...${address.slice(-4)}`;
+	};
+
+	const formatStakedAmount = (amount: bigint) => {
+		const vc = Number(amount) / 1e18;
+		return vc.toLocaleString(undefined, { maximumFractionDigits: 2 });
+	};
+
+	if (!account) {
+		return (
+			<div className="mb-20 p-6 border border-zinc-800 rounded-lg bg-zinc-900/50">
+				<p className="text-zinc-400 text-center">
+					Connect your wallet to calculate your feeless quota.
+				</p>
+			</div>
+		);
+	}
+
+	return (
+		<div className="mb-20 space-y-6">
+			{/* Explanation Banner */}
+			<div className="p-4 bg-blue-900/20 border border-blue-800 rounded-lg">
+				<p className="text-blue-400 text-sm font-semibold mb-1">💡 How This Works</p>
+				<p className="text-blue-300/80 text-xs">
+					Since the contract only provides <code className="text-blue-200">getStake()</code>, we're calculating your quota 
+					using the VinuChain formula: <strong>Qi = M × (1 - 2 / (1 + e^(Li × ξi × ρ)))</strong>
+				</p>
+				<p className="text-blue-300/70 text-xs mt-2">
+					Quota is calculated over a rolling 75-block window and varies based on network congestion.
+				</p>
+			</div>
+
+			<div className="p-6 border border-zinc-800 rounded-lg bg-zinc-900/50">
+				<h2 className="text-xl font-semibold mb-4 text-zinc-100">
+					Your Quota Dashboard
+				</h2>
+				
+				<div className="space-y-6">
+					{/* Wallet Address */}
+					<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
+						<p className="text-xs text-zinc-500 mb-2 uppercase tracking-wide">Connected Wallet</p>
+						<div className="flex items-center gap-3">
+							<p className="text-zinc-200 font-mono text-sm">{formatAddress(walletAddress)}</p>
+							<button
+								onClick={() => navigator.clipboard.writeText(walletAddress)}
+								className="text-zinc-400 hover:text-zinc-200 text-xs px-2 py-1 rounded hover:bg-zinc-700 transition-colors"
+							>
+								Copy
+							</button>
+						</div>
+					</div>
+
+					{/* Network Status */}
+					{(gasPrice !== null || blockNumber !== null) ? (
+						<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
+							<div className="flex items-center justify-between mb-2">
+								<p className="text-xs text-zinc-500 uppercase tracking-wide">Network Status</p>
+								{lastUpdate ? (
+									<p className="text-xs text-zinc-600">
+										Updated {lastUpdate.toLocaleTimeString()}
+									</p>
+								) : null}
+							</div>
+							<div className="grid grid-cols-2 gap-4">
+								{gasPrice !== null ? (
+									<div>
+										<p className="text-zinc-400 text-xs">Gas Price</p>
+										<p className="text-zinc-200 font-mono text-sm">
+											{(Number(gasPrice) / 1e9).toFixed(2)} Gwei
+										</p>
+									</div>
+								) : null}
+								{blockNumber !== null ? (
+									<div>
+										<p className="text-zinc-400 text-xs">Block Number</p>
+										<p className="text-zinc-200 font-mono text-sm">
+											{blockNumber.toLocaleString()}
+										</p>
+									</div>
+								) : null}
+							</div>
+						</div>
+					) : null}
+
+					{/* Error Handling */}
+					{!!contractError && !isNoStakeError ? (
+						<div className="p-4 bg-red-900/20 border border-red-800 rounded-lg">
+							<p className="text-red-400 text-sm font-semibold mb-1">⚠️ Error Loading Stake Data</p>
+							<p className="text-red-300 text-xs">
+								{String(contractError)}
+							</p>
+						</div>
+					) : null}
+
+					{/* No Stake Message */}
+					{(isNoStakeError || (!isStakeLoading && (stakedAmount === undefined || stakedAmount === null || (typeof stakedAmount === "bigint" && stakedAmount === 0n)))) && (
+						<div className="p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg">
+							<p className="text-yellow-400 text-sm font-semibold mb-1">ℹ️ No Stake Found</p>
+							<p className="text-yellow-300 text-xs">
+								This wallet doesn't have any VC staked. Stake VC to get quota for feeless transactions.
+							</p>
+						</div>
+					)}
+
+					{/* Staked Amount Display */}
+					{!contractError && hasStake && (
+						<>
+							<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
+								<p className="text-xs text-zinc-500 mb-2 uppercase tracking-wide">Your Staked Amount</p>
+								{isStakeLoading ? (
+									<div className="flex items-center gap-2">
+										<div className="animate-spin rounded-full h-4 w-4 border-b-2 border-violet-400"></div>
+										<p className="text-zinc-400 text-sm">Loading...</p>
+									</div>
+								) : (
+									<div>
+										<p className="text-zinc-200 font-mono text-2xl font-bold">
+											{formatStakedAmount(stakedAmount as bigint)} VC
+										</p>
+										<p className="text-zinc-500 text-xs mt-1">
+											Raw: {String(stakedAmount)} wei
+										</p>
+									</div>
+								)}
+							</div>
+
+							{/* Network Load Slider */}
+							<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
+								<p className="text-xs text-zinc-500 mb-2 uppercase tracking-wide">
+									Network Congestion Estimate
+								</p>
+								<div className="space-y-3">
+									<input
+										type="range"
+										min="0"
+										max="500"
+										value={networkLoad}
+										onChange={(e) => setNetworkLoad(Number(e.target.value))}
+										className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-violet-500"
+									/>
+									<div className="flex items-center justify-between">
+										<p className="text-zinc-400 text-sm">
+											Average: <span className="text-violet-400 font-mono">{networkLoad} UT</span>
+										</p>
+										<p className="text-zinc-500 text-xs">
+											{networkLoad <= 50 ? "Low" : networkLoad <= 150 ? "Medium" : networkLoad <= 300 ? "High" : "Very High"}
+										</p>
+									</div>
+								</div>
+								<p className="text-zinc-600 text-xs mt-2 italic">
+									Adjust to simulate different network conditions. Lower = more quota available.
+								</p>
+							</div>
+
+							{/* Calculated Quota Display */}
+							<div className="p-6 bg-gradient-to-br from-violet-900/20 to-purple-900/20 rounded-lg border-2 border-violet-700/50">
+								<p className="text-sm text-zinc-400 mb-3 uppercase tracking-wide">
+									Calculated Available Quota (75-block window)
+								</p>
+								<p className="text-violet-400 font-mono text-4xl font-bold mb-2">
+									{calculatedQuota.toLocaleString(undefined, { 
+										maximumFractionDigits: 0
+									})}
+								</p>
+								<div className="grid grid-cols-2 gap-4 mt-4">
+									<div>
+										<p className="text-zinc-500 text-xs">UTPS</p>
+										<p className="text-violet-300 font-mono text-lg">
+											{utps.toFixed(2)}
+										</p>
+									</div>
+									<div>
+										<p className="text-zinc-500 text-xs">UTPE (75 blocks)</p>
+										<p className="text-violet-300 font-mono text-lg">
+											{(utps * 75).toFixed(0)}
+										</p>
+									</div>
+								</div>
+							</div>
+
+							{/* Available Transactions */}
+							<div className="p-6 bg-zinc-800/50 rounded-lg border border-zinc-700">
+								<div className="flex items-center justify-between mb-4">
+									<p className="text-sm text-zinc-400 uppercase tracking-wide">
+										Available Feeless Transactions
+									</p>
+								</div>
+								<div className="space-y-3">
+									<TransactionCard
+										label="Simple VC Transfers"
+										count={availableTransactions.simpleTransfers}
+										quotaCost="21,000 quota each"
+									/>
+									<TransactionCard
+										label="VinuSwap Trades (estimated)"
+										count={availableTransactions.swaps}
+										quotaCost="~150,000 quota each"
+									/>
+									<TransactionCard
+										label="VinuNFT Mints (estimated)"
+										count={availableTransactions.nftMints}
+										quotaCost="~150,000 quota each"
+									/>
+									<TransactionCard
+										label="Smart Contract Deployments"
+										count={availableTransactions.contractCreations}
+										quotaCost="41,825 quota each"
+									/>
+									<TransactionCard
+										label="Stake/Unstake Operations"
+										count={availableTransactions.stakeOperations}
+										quotaCost="104,166 quota each"
+									/>
+								</div>
+								<p className="text-zinc-600 text-xs mt-4 italic">
+									* Quota refreshes continuously over a rolling 75-block window (~75 seconds)
+								</p>
+							</div>
+
+							{/* Formula Display */}
+							<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
+								<p className="text-xs text-zinc-500 mb-2 uppercase tracking-wide">Calculation Method</p>
+								<div className="bg-zinc-900/50 p-3 rounded border border-zinc-700">
+									<p className="text-xs text-zinc-400 font-mono mb-2">
+										Qi = M × (1 - 2 / (1 + e^(Li × ξi × ρ)))
+									</p>
+									<div className="text-xs text-zinc-500 space-y-1">
+										<p>M = 1,000,000 (maximum)</p>
+										<p>ρ = 3.13478991 × 10⁻²²</p>
+										<p>ξi = {formatStakedAmount(stakedAmount as bigint)} VC (your stake)</p>
+										<p>Li = {calculateNetworkLoadParameter(networkLoad).toFixed(2)} (network load parameter)</p>
+									</div>
+								</div>
+							</div>
+						</>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function TransactionCard({ label, count, quotaCost }: { label: string; count: number; quotaCost: string }) {
+	return (
+		<div className="p-4 bg-zinc-900/50 rounded-lg border border-zinc-700 hover:border-violet-600/50 transition-colors">
+			<div className="flex items-center justify-between">
+				<div>
+					<p className="text-zinc-200 text-base">{label}</p>
+					<p className="text-zinc-500 text-xs mt-1">{quotaCost}</p>
+				</div>
+				<p className="text-violet-400 font-semibold text-2xl font-mono">
+					{count.toLocaleString()}
+				</p>
+			</div>
+		</div>
 	);
 }
 
@@ -111,397 +507,22 @@ function ThirdwebResources() {
 	return (
 		<div className="grid gap-4 lg:grid-cols-3 justify-center">
 			<ArticleCard
+				title="VinuChain Quota System"
+				href="https://vinu.gitbook.io/vinuchain/whitepaper/whitepaper/quota-system"
+				description="Learn about VinuChain's feeless transaction quota system"
+			/>
+
+			<ArticleCard
 				title="thirdweb SDK Docs"
 				href="https://portal.thirdweb.com/typescript/v5"
 				description="thirdweb TypeScript SDK documentation"
 			/>
 
 			<ArticleCard
-				title="Components and Hooks"
-				href="https://portal.thirdweb.com/typescript/v5/react"
-				description="Learn about the thirdweb React components and hooks in thirdweb SDK"
+				title="VinuChain Explorer"
+				href="https://vinuexplorer.org"
+				description="Explore VinuChain transactions and contracts"
 			/>
-
-			<ArticleCard
-				title="thirdweb Dashboard"
-				href="https://thirdweb.com/dashboard"
-				description="Deploy, configure, and manage your smart contracts from the dashboard."
-			/>
-		</div>
-	);
-}
-
-function SFCContractInfo() {
-	const account = useActiveAccount();
-	const walletAddress = account?.address || "0x0000000000000000000000000000000000000000";
-	
-	// State for gas price and dynamic calculations
-	const [gasPrice, setGasPrice] = useState<bigint | null>(null);
-	const [gasPriceError, setGasPriceError] = useState<string | null>(null);
-	const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-	const [chainMismatch, setChainMismatch] = useState(false);
-
-		// Call the quota function and pass the user's wallet address
-		// Using getStake function from the quota contract
-		// Note: This function may revert if the address has no quota
-		// We'll handle that case by treating it as 0 quota
-		const { 
-			data: quotaData, 
-			isLoading: isQuotaDataLoading,
-			error: contractError
-		} = useReadContract({
-			contract: contract,
-			method: "getStake",
-			params: [walletAddress as `0x${string}`],
-		queryOptions: {
-			enabled: !chainMismatch && !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
-			retry: 0, // Don't retry - if it reverts, we'll handle it as no quota
-		},
-	});
-
-	// Check if error is due to no quota (execution reverted) vs other errors
-	const isNoQuotaError = contractError && 
-		(String(contractError).includes("execution reverted") || 
-		 String(contractError).includes("revert") ||
-		 String(contractError).toLowerCase().includes("no quota"));
-
-		// Log errors for debugging
-		useEffect(() => {
-			if (contractError) {
-				console.error("Contract call error:", contractError);
-				console.error("Error details:", {
-					contractAddress: QUOTA_CONTRACT_ADDRESS,
-					method: "getStake",
-					params: [walletAddress],
-					chainId: 207,
-				});
-			}
-		}, [contractError, walletAddress]);
-
-	// Check if wallet is on correct chain (if chain info is available)
-	useEffect(() => {
-		// Note: thirdweb's useActiveAccount doesn't always expose chain info
-		// We'll rely on the contract error to detect chain mismatches
-		setChainMismatch(false); // Reset, will be set by error handling if needed
-	}, [account]);
-
-	// Fetch current gas price from VinuChain network
-	useEffect(() => {
-		const fetchGasPrice = async () => {
-			if (!account) return;
-
-			try {
-				// Get RPC client for VinuChain
-				const rpcClient = getRpcClient({ chain: vinuchainMainnet, client });
-				
-				// Get gas price using eth_gasPrice RPC call
-				const price = await rpcClient({
-					method: "eth_gasPrice",
-				} as any);
-				
-				// Convert hex string to BigInt
-				const priceBigInt = BigInt(price as string);
-				setGasPrice(priceBigInt);
-				setGasPriceError(null);
-				setLastUpdate(new Date());
-			} catch (error) {
-				console.error("Error fetching gas price:", error);
-				setGasPriceError(
-					error instanceof Error ? error.message : "Failed to fetch gas price"
-				);
-			}
-		};
-
-		// Initial fetch
-		fetchGasPrice();
-
-		// Poll every 30 seconds for updated gas price
-		const interval = setInterval(fetchGasPrice, 30000);
-
-		return () => clearInterval(interval);
-	}, [account]);
-
-	// Helper function to format wallet address (truncate with ellipsis)
-	const formatAddress = (address: string) => {
-		if (!address || address === "0x0000000000000000000000000000000000000000") return "Not connected";
-		return `${address.slice(0, 6)}...${address.slice(-4)}`;
-	};
-
-	if (!account) {
-		return (
-			<div className="mb-20 p-6 border border-zinc-800 rounded-lg bg-zinc-900/50">
-				<p className="text-zinc-400 text-center">
-					Connect your wallet to view your feeless quota calculator.
-				</p>
-			</div>
-		);
-	}
-
-	return (
-		<div className="mb-20 p-6 border border-zinc-800 rounded-lg bg-zinc-900/50">
-			<h2 className="text-xl font-semibold mb-4 text-zinc-100">
-				Your Feeless Quota Calculator
-			</h2>
-			
-			<div className="space-y-6">
-				{/* Wallet Address Section */}
-				<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
-					<p className="text-xs text-zinc-500 mb-2 uppercase tracking-wide">Connected Wallet Address</p>
-					<div className="flex items-center gap-3">
-						<p className="text-zinc-200 font-mono text-sm">
-							{formatAddress(walletAddress)}
-						</p>
-						<button
-							onClick={() => navigator.clipboard.writeText(walletAddress)}
-							className="text-zinc-400 hover:text-zinc-200 text-xs px-2 py-1 rounded hover:bg-zinc-700 transition-colors"
-							title="Copy full address"
-						>
-							Copy
-						</button>
-					</div>
-					<p className="text-zinc-500 font-mono text-xs mt-1 break-all opacity-70">
-						{walletAddress}
-					</p>
-				</div>
-
-				{/* Chain Mismatch Warning - Show if error suggests wrong network */}
-				{contractError && typeof contractError === "object" && 
-				 (String(contractError).includes("network") || 
-				  String(contractError).includes("chain") ||
-				  String(contractError).includes("207")) && (
-					<div className="p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg mb-4">
-						<p className="text-yellow-400 text-sm font-semibold mb-1">⚠️ Network Configuration Issue</p>
-						<p className="text-yellow-400/70 text-xs">
-							Please ensure you're connected to <strong>VinuChain Mainnet (Chain ID: 207)</strong>.
-						</p>
-						<p className="text-yellow-400/50 text-xs mt-2">
-							If using a mobile wallet (like SafePal), you may need to add VinuChain Mainnet manually:
-						</p>
-						<ul className="text-yellow-400/50 text-xs mt-1 ml-4 list-disc">
-							<li>Network Name: VinuChain Mainnet</li>
-							<li>Chain ID: 207</li>
-							<li>Currency Symbol: VC</li>
-							<li>RPC URL: Check VinuChain documentation for official RPC endpoint</li>
-						</ul>
-					</div>
-				)}
-
-				{/* Error Handling - Show different messages for no quota vs other errors */}
-				{contractError && !isNoQuotaError && (
-					<div className="p-4 bg-red-900/20 border border-red-800 rounded-lg">
-						<p className="text-red-400 text-sm font-semibold mb-1">⚠️ Error Loading Contract Data</p>
-						<p className="text-red-300 text-xs font-mono break-all">
-							{(() => {
-								if (contractError instanceof Error) {
-									return contractError.message || contractError.toString();
-								}
-								if (typeof contractError === "object") {
-									try {
-										const errorStr = JSON.stringify(contractError, Object.getOwnPropertyNames(contractError), 2);
-										// Try to extract meaningful error message
-										if (errorStr.includes("message")) {
-											const parsed = JSON.parse(errorStr);
-											return parsed.message || errorStr;
-										}
-										return errorStr;
-									} catch {
-										// If JSON.stringify fails, try to get error properties
-										if ("message" in contractError) {
-											return String((contractError as any).message);
-										}
-										return String(contractError);
-									}
-								}
-								return String(contractError);
-							})()}
-						</p>
-						<p className="text-red-400/70 text-xs mt-2">
-							Please ensure you're connected to VinuChain Mainnet (Chain ID: 207) and try again.
-						</p>
-						<p className="text-red-400/50 text-xs mt-1">
-							If the error persists, check the browser console for more details.
-						</p>
-					</div>
-				)}
-
-				{/* No Quota Message - Treat revert as no quota */}
-				{isNoQuotaError && (
-					<div className="p-4 bg-blue-900/20 border border-blue-800 rounded-lg">
-						<p className="text-blue-400 text-sm font-semibold mb-1">ℹ️ No Quota Found</p>
-						<p className="text-blue-300 text-xs">
-							This wallet address doesn't have any quota on VinuChain Mainnet.
-						</p>
-						<p className="text-blue-400/70 text-xs mt-2">
-							To use feeless transactions, you need to have quota available on VinuChain.
-						</p>
-					</div>
-				)}
-
-				{/* Raw Result Section */}
-				{!contractError && (
-					<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
-						<p className="text-xs text-zinc-500 mb-2 uppercase tracking-wide">Raw Contract Result</p>
-						{isQuotaDataLoading ? (
-							<div className="flex items-center gap-2">
-								<div className="animate-spin rounded-full h-4 w-4 border-b-2 border-violet-400"></div>
-								<p className="text-zinc-400 text-sm">Loading your quota data from VinuChain...</p>
-							</div>
-						) : quotaData !== undefined ? (
-							<p className="text-zinc-200 font-mono text-sm break-all bg-zinc-900/50 p-3 rounded border border-zinc-700">
-								{String(quotaData)}
-							</p>
-						) : (
-							<p className="text-zinc-400 text-sm">No result available</p>
-						)}
-					</div>
-				)}
-
-				{/* Feeless Trades Available Section */}
-				{(!contractError || isNoQuotaError) && (quotaData !== undefined || isNoQuotaError) && (() => {
-					// If no quota error, treat as 0 quota
-					const actualQuotaData = isNoQuotaError ? 0n : quotaData;
-					// Calculate quota (raw result / 1000)
-					// If no quota, quota is 0
-					const quota = typeof actualQuotaData === "bigint" 
-						? Number(actualQuotaData) / 1000
-						: typeof actualQuotaData === "number"
-						? actualQuotaData / 1000
-						: Number(actualQuotaData || 0) / 1000;
-
-					// Typical gas limits for different transaction types on VinuChain
-					// These are estimates and may vary based on actual transaction complexity
-					const GAS_LIMIT_VINUSWAP_TRADE = 150000n; // Typical swap gas usage
-					const GAS_LIMIT_VC_TRANSFER = 21000n; // Standard ERC20 transfer
-					const GAS_LIMIT_VINUNFT_MINT = 150000n; // Typical NFT mint gas usage
-
-					// Calculate dynamic quota costs and available transactions
-					let vinuswapTrades = 0;
-					let vcTransfers = 0;
-					let vinunftMints = 0;
-					let quotaCostPerVinuSwap = 0;
-					let quotaCostPerVCTransfer = 0;
-					let quotaCostPerVinuNFT = 0;
-
-					if (gasPrice !== null && quota > 0) {
-						// Calculate quota cost per transaction: (gas_price × gas_used) / 1000
-						// The quota is already divided by 1000, so we need to match that unit
-						// Quota cost = (gas_price × gas_used) in wei, converted to quota units
-						quotaCostPerVinuSwap = Number((gasPrice * GAS_LIMIT_VINUSWAP_TRADE) / 1000n) / 1e18;
-						quotaCostPerVCTransfer = Number((gasPrice * GAS_LIMIT_VC_TRANSFER) / 1000n) / 1e18;
-						quotaCostPerVinuNFT = Number((gasPrice * GAS_LIMIT_VINUNFT_MINT) / 1000n) / 1e18;
-
-						// Calculate available transactions
-						if (quotaCostPerVinuSwap > 0) {
-							vinuswapTrades = Math.floor(quota / quotaCostPerVinuSwap);
-						}
-						if (quotaCostPerVCTransfer > 0) {
-							vcTransfers = Math.floor(quota / quotaCostPerVCTransfer);
-						}
-						if (quotaCostPerVinuNFT > 0) {
-							vinunftMints = Math.floor(quota / quotaCostPerVinuNFT);
-						}
-					}
-
-					return (
-						<>
-							<div className="p-6 bg-gradient-to-br from-violet-900/20 to-purple-900/20 rounded-lg border-2 border-violet-700/50">
-								<p className="text-sm text-zinc-400 mb-3 uppercase tracking-wide">Feeless Trades Available</p>
-								<p className="text-violet-400 font-mono text-4xl font-bold">
-									{quota.toLocaleString(undefined, { 
-										maximumFractionDigits: 2,
-										minimumFractionDigits: 0 
-									})}
-								</p>
-								<p className="text-zinc-500 text-xs mt-2">
-									Based on your quota data divided by 1000
-								</p>
-							</div>
-
-							{/* Gas Price Info */}
-							{gasPriceError && (
-								<div className="p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg">
-									<p className="text-yellow-400 text-sm font-semibold mb-1">⚠️ Unable to Fetch Gas Price</p>
-									<p className="text-yellow-300 text-xs">
-										{gasPriceError}
-									</p>
-									<p className="text-yellow-400/70 text-xs mt-2">
-										Calculations will use static estimates. Real-time updates require gas price data.
-									</p>
-								</div>
-							)}
-
-							{gasPrice && (
-								<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
-									<div className="flex items-center justify-between mb-2">
-										<p className="text-xs text-zinc-500 uppercase tracking-wide">Current Network Gas Price</p>
-										{lastUpdate && (
-											<p className="text-xs text-zinc-600">
-												Updated {lastUpdate.toLocaleTimeString()}
-											</p>
-										)}
-									</div>
-									<p className="text-zinc-200 font-mono text-sm">
-										{(Number(gasPrice) / 1e9).toFixed(2)} Gwei
-									</p>
-									<p className="text-zinc-500 text-xs mt-1">
-										Updates every 30 seconds
-									</p>
-								</div>
-							)}
-
-							{/* Dynamic Human-Readable Action Translations */}
-							<div className="p-6 bg-zinc-800/50 rounded-lg border border-zinc-700">
-								<div className="flex items-center justify-between mb-4">
-									<p className="text-sm text-zinc-400 uppercase tracking-wide">Your Feeless Actions Available</p>
-									{gasPrice !== null ? (
-										<p className="text-xs text-zinc-600">
-											<span className="inline-block w-2 h-2 bg-green-400 rounded-full mr-1"></span>
-											Live
-										</p>
-									) : null}
-								</div>
-								<div className="space-y-3">
-									<div className="p-4 bg-zinc-900/50 rounded-lg border border-zinc-700 hover:border-violet-600/50 transition-colors">
-										<p className="text-zinc-200 text-base leading-relaxed mb-1">
-											You have <span className="text-violet-400 font-semibold">{vinuswapTrades.toLocaleString()}</span> feeless <span className="text-violet-300">VinuSwap trades</span> left today.
-										</p>
-										{gasPrice !== null && quotaCostPerVinuSwap > 0 && (
-											<p className="text-zinc-500 text-xs mt-1">
-												~{quotaCostPerVinuSwap.toFixed(4)} quota per trade
-											</p>
-										)}
-									</div>
-									<div className="p-4 bg-zinc-900/50 rounded-lg border border-zinc-700 hover:border-violet-600/50 transition-colors">
-										<p className="text-zinc-200 text-base leading-relaxed mb-1">
-											You have <span className="text-violet-400 font-semibold">{vcTransfers.toLocaleString()}</span> feeless <span className="text-violet-300">$VC transfers</span> left today.
-										</p>
-										{gasPrice !== null && quotaCostPerVCTransfer > 0 && (
-											<p className="text-zinc-500 text-xs mt-1">
-												~{quotaCostPerVCTransfer.toFixed(4)} quota per transfer
-											</p>
-										)}
-									</div>
-									<div className="p-4 bg-zinc-900/50 rounded-lg border border-zinc-700 hover:border-violet-600/50 transition-colors">
-										<p className="text-zinc-200 text-base leading-relaxed mb-1">
-											You have <span className="text-violet-400 font-semibold">{vinunftMints.toLocaleString()}</span> feeless <span className="text-violet-300">VinuNFT mints</span> left today.
-										</p>
-										{gasPrice !== null && quotaCostPerVinuNFT > 0 && (
-											<p className="text-zinc-500 text-xs mt-1">
-												~{quotaCostPerVinuNFT.toFixed(4)} quota per mint
-											</p>
-										)}
-									</div>
-								</div>
-								{gasPrice !== null && (
-									<p className="text-zinc-500 text-xs mt-4 italic">
-										* Calculations update automatically based on current network gas price
-									</p>
-								)}
-							</div>
-						</>
-					);
-				})()}
-			</div>
 		</div>
 	);
 }
