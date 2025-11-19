@@ -1,11 +1,12 @@
-import { ConnectButton, useActiveAccount, useReadContract } from "thirdweb/react";
+import { ConnectButton, useActiveAccount } from "thirdweb/react";
 import { defineChain } from "thirdweb/chains";
 import { getContract } from "thirdweb/contract";
-import { getRpcClient } from "thirdweb";
+import { getRpcClient, readContract, prepareEvent, getContractEvents } from "thirdweb";
 import { useEffect, useState } from "react";
 import thirdwebIcon from "./thirdweb.svg";
 import { client } from "./client";
 import { QUOTA_CONTRACT_ABI } from "./quota-contract-abi";
+import { SFC_CONTRACT_ABI } from "./sfc-contract-abi";
 
 // VinuChain Mainnet configuration
 const vinuchainMainnet = defineChain({
@@ -20,12 +21,20 @@ const vinuchainMainnet = defineChain({
 
 // Quota Contract Address (SFC Contract for staking data)
 const QUOTA_CONTRACT_ADDRESS = "0x9D6Aa03a8D4AcF7b43c562f349Ee45b3214c3bbF" as `0x${string}`;
+const SFC_CONTRACT_ADDRESS = "0xFC00FACE00000000000000000000000000000000" as `0x${string}`;
 
 const contract = getContract({
 	client: client,
 	chain: vinuchainMainnet,
 	address: QUOTA_CONTRACT_ADDRESS,
 	abi: QUOTA_CONTRACT_ABI,
+});
+
+const sfcContract = getContract({
+	client: client,
+	chain: vinuchainMainnet,
+	address: SFC_CONTRACT_ADDRESS,
+	abi: SFC_CONTRACT_ABI,
 });
 
 // VinuChain Quota System Constants
@@ -182,28 +191,84 @@ function QuotaCalculator() {
 	const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 	const [blockNumber, setBlockNumber] = useState<number | null>(null);
 
-	// FIXED: Get staked amount using getStake with BOTH address and validator ID
-	// Validator ID 0 is typically used for the Payback contract
-	// ✅ ALTERNATIVE - Explicitly type the params
-	const validatorId = 0n;
+	// State for staking data
+	const [stakedAmount, setStakedAmount] = useState<bigint>(0n);
+	const [isStakeLoading, setIsStakeLoading] = useState<boolean>(false);
+	const [contractError, setContractError] = useState<unknown>(null);
+	const [validatorStakes, setValidatorStakes] = useState<{ id: bigint; amount: bigint }[]>([]);
 
-	const {
-		data: stakedAmount,
-		isLoading: isStakeLoading,
-		error: contractError
-	} = useReadContract({
-		contract,
-		method: "getStake",
-		params: [walletAddress],
-		queryOptions: {
-			enabled: !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
-			retry: 0,
-		},
-	});
+	// Fetch stake data
+	useEffect(() => {
+		const fetchStakeData = async () => {
+			if (!walletAddress || walletAddress === "0x0000000000000000000000000000000000000000") {
+				setStakedAmount(0n);
+				setValidatorStakes([]);
+				return;
+			}
 
-	const isNoStakeError = Boolean(contractError) &&
-		(String(contractError).includes("execution reverted") ||
-			String(contractError).includes("revert"));
+			setIsStakeLoading(true);
+			setContractError(null);
+
+			try {
+				// 1. Get Delegated events to find which validators the user has interacted with
+				const delegatedEvent = prepareEvent({
+					signature: "event Delegated(address indexed delegator, uint256 indexed toValidatorID, uint256 amount)",
+					filters: {
+						delegator: walletAddress,
+					},
+				});
+
+				const events = await getContractEvents({
+					contract: sfcContract,
+					events: [delegatedEvent],
+					fromBlock: "earliest",
+				});
+
+				// 2. Extract unique validator IDs
+				const uniqueValidatorIds = new Set<bigint>();
+				// Always check validator 0 (Payback contract) just in case
+				uniqueValidatorIds.add(0n);
+
+				events.forEach((event) => {
+					const { toValidatorID } = event.args;
+					uniqueValidatorIds.add(toValidatorID);
+				});
+
+				// 3. Fetch stake for each validator
+				const stakes: { id: bigint; amount: bigint }[] = [];
+				let total = 0n;
+
+				for (const vid of uniqueValidatorIds) {
+					try {
+						const stake = await readContract({
+							contract: sfcContract,
+							method: "getStake",
+							params: [walletAddress, vid],
+						});
+
+						if (stake > 0n) {
+							stakes.push({ id: vid, amount: stake });
+							total += stake;
+						}
+					} catch (err) {
+						console.warn(`Failed to fetch stake for validator ${vid}`, err);
+					}
+				}
+
+				setValidatorStakes(stakes);
+				setStakedAmount(total);
+
+			} catch (err) {
+				console.error("Error fetching stake data:", err);
+				setContractError(err);
+			} finally {
+				setIsStakeLoading(false);
+			}
+		};
+
+		fetchStakeData();
+	}, [walletAddress]);
+
 
 	// Fetch current gas price and block number
 	useEffect(() => {
@@ -238,15 +303,18 @@ function QuotaCalculator() {
 	}, [account]);
 
 	// Calculate quota dynamically
-	const hasStake = stakedAmount && (typeof stakedAmount === "bigint" ? stakedAmount > 0n : Boolean(stakedAmount));
+	const hasStake = stakedAmount > 0n;
 	const calculatedQuota = hasStake
-		? calculateQuotaFromStake(stakedAmount as bigint, networkLoad)
+		? calculateQuotaFromStake(stakedAmount, networkLoad)
 		: 0;
 
 	const utps = calculateUTPS(calculatedQuota);
 	const availableTransactions = calculateAvailableTransactions(calculatedQuota);
 
 	// Helper to check if there's a contract error (not a revert/no stake)
+	const isNoStakeError = Boolean(contractError) &&
+		(String(contractError).includes("execution reverted") ||
+			String(contractError).includes("revert"));
 	const hasContractError = Boolean(contractError) && !isNoStakeError;
 
 	// Format functions
@@ -276,8 +344,8 @@ function QuotaCalculator() {
 			<div className="p-4 bg-blue-900/20 border border-blue-800 rounded-lg">
 				<p className="text-blue-400 text-sm font-semibold mb-1">💡 How This Works</p>
 				<p className="text-blue-300/80 text-xs">
-					We fetch your staked amount using <code className="text-blue-200">getStake(address, validatorID)</code> and calculate quota
-					using the VinuChain formula: <strong>Qi = M × (1 - 2 / (1 + e^(Li × ξi × ρ)))</strong>
+					We automatically scan the blockchain for your validators and fetch your total stake.
+					Quota is calculated using: <strong>Qi = M × (1 - 2 / (1 + e^(Li × ξi × ρ)))</strong>
 				</p>
 				<p className="text-blue-300/70 text-xs mt-2">
 					Quota is calculated over a rolling 75-block window and varies based on network congestion.
@@ -350,11 +418,11 @@ function QuotaCalculator() {
 					) : null}
 
 					{/* No Stake Message */}
-					{(isNoStakeError || (!isStakeLoading && (stakedAmount === undefined || stakedAmount === null || (typeof stakedAmount === "bigint" && stakedAmount === 0n)))) ? (
+					{(isNoStakeError || (!isStakeLoading && stakedAmount === 0n)) ? (
 						<div className="p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg">
 							<p className="text-yellow-400 text-sm font-semibold mb-1">ℹ️ No Stake Found</p>
 							<p className="text-yellow-300 text-xs">
-								This wallet doesn't have any VC staked on validator ID 0. Stake VC to get quota for feeless transactions.
+								This wallet doesn't have any VC staked. Stake VC to get quota for feeless transactions.
 							</p>
 							<p className="text-yellow-400/70 text-xs mt-2">
 								To stake: Visit VinuChain's staking platform and delegate to a validator.
@@ -375,14 +443,24 @@ function QuotaCalculator() {
 								) : (
 									<div>
 										<p className="text-zinc-200 font-mono text-2xl font-bold">
-											{formatStakedAmount(stakedAmount as bigint)} VC
+											{formatStakedAmount(stakedAmount)} VC
 										</p>
 										<p className="text-zinc-500 text-xs mt-1">
 											Raw: {String(stakedAmount)} wei
 										</p>
-										<p className="text-zinc-600 text-xs mt-1">
-											Validator ID: 0 (Payback Contract)
-										</p>
+
+										{/* Validator Breakdown */}
+										<div className="mt-4 pt-4 border-t border-zinc-700">
+											<p className="text-zinc-400 text-xs mb-2">Validator Breakdown:</p>
+											<div className="space-y-2">
+												{validatorStakes.map((v) => (
+													<div key={v.id.toString()} className="flex justify-between text-xs">
+														<span className="text-zinc-300">Validator #{v.id.toString()}</span>
+														<span className="text-zinc-400 font-mono">{formatStakedAmount(v.amount)} VC</span>
+													</div>
+												))}
+											</div>
+										</div>
 									</div>
 								)}
 							</div>
@@ -490,7 +568,7 @@ function QuotaCalculator() {
 									<div className="text-xs text-zinc-500 space-y-1">
 										<p>M = 1,000,000 (maximum)</p>
 										<p>ρ = 3.13478991 × 10⁻²²</p>
-										<p>ξi = {formatStakedAmount(stakedAmount as bigint)} VC (your stake)</p>
+										<p>ξi = {formatStakedAmount(stakedAmount)} VC (your stake)</p>
 										<p>Li = {calculateNetworkLoadParameter(networkLoad).toFixed(2)} (network load parameter)</p>
 									</div>
 								</div>
