@@ -40,7 +40,7 @@ function calculateNetworkLoadParameter(avgQuotaUsed: number): number {
 	// For low congestion (0-50 UT): Li ≈ 1
 	// For medium congestion (51-100 UT): Li ≈ 0.8-0.95
 	// For high congestion (100+ UT): Li decreases further
-	
+
 	if (avgQuotaUsed <= 50) return 1.0;
 	if (avgQuotaUsed <= 100) return 0.9;
 	if (avgQuotaUsed <= 150) return 0.8;
@@ -60,19 +60,19 @@ function calculateQuotaFromStake(
 ): number {
 	// Convert staked amount from wei to VC
 	const stakedVC = Number(stakedAmountWei) / 1e18;
-	
+
 	if (stakedVC === 0) return 0;
-	
+
 	// Calculate network load parameter
 	const Li = calculateNetworkLoadParameter(networkLoad);
-	
+
 	// Calculate quota using the exponential formula
 	const exponent = Li * stakedVC * RHO;
 	const quotaPerBlock = M * (1 - 2 / (1 + Math.exp(exponent)));
-	
+
 	// Total quota over 75 blocks (UTPE)
 	const totalQuota = quotaPerBlock * QUOTA_REFRESH_BLOCKS;
-	
+
 	return totalQuota;
 }
 
@@ -89,7 +89,7 @@ function calculateAvailableTransactions(quota: number) {
 	const STAKE_QUOTA = 104166;
 	const SWAP_ESTIMATE = 150000; // Approximate for DEX swap
 	const NFT_MINT_ESTIMATE = 150000; // Approximate for NFT mint
-	
+
 	return {
 		simpleTransfers: Math.floor(quota / SIMPLE_TRANSFER),
 		contractCreations: Math.floor(quota / SMART_CONTRACT_CREATE),
@@ -175,7 +175,7 @@ function Header() {
 function QuotaCalculator() {
 	const account = useActiveAccount();
 	const walletAddress = account?.address || "0x0000000000000000000000000000000000000000";
-	
+
 	// State for network conditions and gas price
 	const [networkLoad, setNetworkLoad] = useState<number>(50); // Default to low congestion
 	const [gasPrice, setGasPrice] = useState<bigint | null>(null);
@@ -184,26 +184,26 @@ function QuotaCalculator() {
 
 	// FIXED: Get staked amount using getStake with BOTH address and validator ID
 	// Validator ID 0 is typically used for the Payback contract
-	const { 
-		data: stakedAmount, 
+	// ✅ ALTERNATIVE - Explicitly type the params
+	const validatorId = 0n;
+
+	const {
+		data: stakedAmount,
 		isLoading: isStakeLoading,
 		error: contractError
 	} = useReadContract({
-		contract: contract,
+		contract,
 		method: "getStake",
-		params: [
-			walletAddress as `0x${string}`,
-			0n  // Validator ID - 0 for Payback contract
-		],
+		params: [walletAddress, validatorId] as any,
 		queryOptions: {
 			enabled: !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
 			retry: 0,
 		},
 	});
 
-	const isNoStakeError = Boolean(contractError) && 
-		(String(contractError).includes("execution reverted") || 
-		 String(contractError).includes("revert"));
+	const isNoStakeError = Boolean(contractError) &&
+		(String(contractError).includes("execution reverted") ||
+			String(contractError).includes("revert"));
 
 	// Fetch current gas price and block number
 	useEffect(() => {
@@ -212,20 +212,20 @@ function QuotaCalculator() {
 
 			try {
 				const rpcClient = getRpcClient({ chain: vinuchainMainnet, client });
-				
+
 				// Get gas price
 				const price = await rpcClient({
 					method: "eth_gasPrice",
 				} as any);
 				const priceBigInt = BigInt(price as string);
 				setGasPrice(priceBigInt);
-				
+
 				// Get current block number
 				const blockNum = await rpcClient({
 					method: "eth_blockNumber",
 				} as any);
 				setBlockNumber(parseInt(blockNum as string, 16));
-				
+
 				setLastUpdate(new Date());
 			} catch (error) {
 				console.error("Error fetching network data:", error);
@@ -242,10 +242,10 @@ function QuotaCalculator() {
 	const calculatedQuota = hasStake
 		? calculateQuotaFromStake(stakedAmount as bigint, networkLoad)
 		: 0;
-	
+
 	const utps = calculateUTPS(calculatedQuota);
 	const availableTransactions = calculateAvailableTransactions(calculatedQuota);
-	
+
 	// Helper to check if there's a contract error (not a revert/no stake)
 	const hasContractError = Boolean(contractError) && !isNoStakeError;
 
@@ -276,7 +276,7 @@ function QuotaCalculator() {
 			<div className="p-4 bg-blue-900/20 border border-blue-800 rounded-lg">
 				<p className="text-blue-400 text-sm font-semibold mb-1">💡 How This Works</p>
 				<p className="text-blue-300/80 text-xs">
-					We fetch your staked amount using <code className="text-blue-200">getStake(address, validatorID)</code> and calculate quota 
+					We fetch your staked amount using <code className="text-blue-200">getStake(address, validatorID)</code> and calculate quota
 					using the VinuChain formula: <strong>Qi = M × (1 - 2 / (1 + e^(Li × ξi × ρ)))</strong>
 				</p>
 				<p className="text-blue-300/70 text-xs mt-2">
@@ -288,7 +288,7 @@ function QuotaCalculator() {
 				<h2 className="text-xl font-semibold mb-4 text-zinc-100">
 					Your Quota Dashboard
 				</h2>
-				
+
 				<div className="space-y-6">
 					{/* Wallet Address */}
 					<div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
@@ -421,7 +421,7 @@ function QuotaCalculator() {
 									Calculated Available Quota (75-block window)
 								</p>
 								<p className="text-violet-400 font-mono text-4xl font-bold mb-2">
-									{calculatedQuota.toLocaleString(undefined, { 
+									{calculatedQuota.toLocaleString(undefined, {
 										maximumFractionDigits: 0
 									})}
 								</p>
