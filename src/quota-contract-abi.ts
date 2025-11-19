@@ -1,32 +1,588 @@
 // Quota Contract ABI - For VinuChain Quota Calculator
-// Contract Address: 0x9D6Aa03a8D4AcF7b43c562f349Ee45b3214c3bbF
-// Source: https://vinuexplorer.org/address/0x9D6Aa03a8D4AcF7b43c562f349Ee45b3214c3bbF?tab=contract
+// Contract Address: 0x1c4269fbbd4a8254f69383eef6af720bcd0acda6
+// Source: https://github.com/imalfect/vcstakingdashboard/blob/main/src/config/chains/vcMainnet.ts
 // 
 // Function: getStake(address) returns (uint256)
 // This function retrieves the stake/quota amount for a given address
 
 export const QUOTA_CONTRACT_ABI = [
-	// getStake function - returns the stake amount for an address
 	{
-		"constant": true,
-		"inputs": [
+		inputs: [],
+		stateMutability: 'nonpayable',
+		type: 'constructor'
+	},
+	{
+		anonymous: false,
+		inputs: [
 			{
-				"internalType": "address",
-				"name": "user",
-				"type": "address"
+				indexed: true,
+				internalType: 'address',
+				name: 'delegator',
+				type: 'address'
+			},
+			{
+				indexed: false,
+				internalType: 'uint256',
+				name: 'amount',
+				type: 'uint256'
 			}
 		],
-		"name": "getStake",
-		"outputs": [
+		name: 'Delegate',
+		type: 'event'
+	},
+	{
+		anonymous: false,
+		inputs: [
 			{
-				"internalType": "uint256",
-				"name": "",
-				"type": "uint256"
+				indexed: true,
+				internalType: 'uint16',
+				name: 'newFeeRefundBlockCount',
+				type: 'uint16'
 			}
 		],
-		"payable": false,
-		"stateMutability": "view",
-		"type": "function"
+		name: 'FeeRefundBlockCountUpdated',
+		type: 'event'
+	},
+	{
+		anonymous: false,
+		inputs: [
+			{
+				indexed: true,
+				internalType: 'uint256',
+				name: 'newHoldTime',
+				type: 'uint256'
+			}
+		],
+		name: 'HoldTimeUpdated',
+		type: 'event'
+	},
+	{
+		anonymous: false,
+		inputs: [
+			{
+				indexed: false,
+				internalType: 'uint8',
+				name: 'version',
+				type: 'uint8'
+			}
+		],
+		name: 'Initialized',
+		type: 'event'
+	},
+	{
+		anonymous: false,
+		inputs: [
+			{
+				indexed: true,
+				internalType: 'uint256',
+				name: 'newMinStake',
+				type: 'uint256'
+			}
+		],
+		name: 'MinStakeUpdated',
+		type: 'event'
+	},
+	{
+		anonymous: false,
+		inputs: [
+			{
+				indexed: true,
+				internalType: 'address',
+				name: 'previousOwner',
+				type: 'address'
+			},
+			{
+				indexed: true,
+				internalType: 'address',
+				name: 'newOwner',
+				type: 'address'
+			}
+		],
+		name: 'OwnershipTransferred',
+		type: 'event'
+	},
+	{
+		anonymous: false,
+		inputs: [
+			{
+				indexed: true,
+				internalType: 'uint256',
+				name: 'newQuotaFactor',
+				type: 'uint256'
+			}
+		],
+		name: 'QuotaFactorUpdated',
+		type: 'event'
+	},
+	{
+		anonymous: false,
+		inputs: [
+			{
+				indexed: true,
+				internalType: 'address',
+				name: 'delegator',
+				type: 'address'
+			},
+			{
+				indexed: false,
+				internalType: 'uint256',
+				name: 'amount',
+				type: 'uint256'
+			},
+			{
+				indexed: true,
+				internalType: 'uint256',
+				name: 'wrID',
+				type: 'uint256'
+			}
+		],
+		name: 'Undelegated',
+		type: 'event'
+	},
+	{
+		anonymous: false,
+		inputs: [
+			{
+				indexed: true,
+				internalType: 'address',
+				name: 'delegator',
+				type: 'address'
+			},
+			{
+				indexed: false,
+				internalType: 'uint256',
+				name: 'amount',
+				type: 'uint256'
+			},
+			{
+				indexed: true,
+				internalType: 'uint256',
+				name: 'wrID',
+				type: 'uint256'
+			}
+		],
+		name: 'Withdrawn',
+		type: 'event'
+	},
+	{
+		inputs: [],
+		name: 'MAX_FEE_REFUND_BLOCK_COUNT',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [],
+		name: 'MAX_HOLD_TIME',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [],
+		name: 'MAX_MIN_STAKE',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [],
+		name: 'MAX_QUOTA_FACTOR',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [],
+		name: 'MIN_FEE_REFUND_BLOCK_COUNT',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [],
+		name: 'MIN_HOLD_TIME',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [],
+		name: 'MIN_MIN_STAKE',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [],
+		name: 'MIN_QUOTA_FACTOR',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [
+			{
+				internalType: 'address',
+				name: '',
+				type: 'address'
+			},
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		name: 'completedWithdrawalRequestIDs',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [],
+		name: 'feeRefundBlockCount',
+		outputs: [
+			{
+				internalType: 'uint16',
+				name: '',
+				type: 'uint16'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [
+			{
+				internalType: 'address',
+				name: 'delegator',
+				type: 'address'
+			},
+			{
+				internalType: 'uint256',
+				name: 'offset',
+				type: 'uint256'
+			},
+			{
+				internalType: 'uint256',
+				name: 'limit',
+				type: 'uint256'
+			}
+		],
+		name: 'getActiveWithdrawalRequestIDs',
+		outputs: [
+			{
+				internalType: 'uint256[]',
+				name: '',
+				type: 'uint256[]'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [
+			{
+				internalType: 'address',
+				name: 'delegator',
+				type: 'address'
+			},
+			{
+				internalType: 'uint256',
+				name: 'offset',
+				type: 'uint256'
+			},
+			{
+				internalType: 'uint256',
+				name: 'limit',
+				type: 'uint256'
+			}
+		],
+		name: 'getActiveWrRequests',
+		outputs: [
+			{
+				components: [
+					{
+						internalType: 'uint256',
+						name: 'id',
+						type: 'uint256'
+					},
+					{
+						internalType: 'uint256',
+						name: 'time',
+						type: 'uint256'
+					},
+					{
+						internalType: 'uint256',
+						name: 'amount',
+						type: 'uint256'
+					},
+					{
+						internalType: 'uint256',
+						name: 'unlockTime',
+						type: 'uint256'
+					},
+					{
+						internalType: 'bool',
+						name: 'completed',
+						type: 'bool'
+					}
+				],
+				internalType: 'struct QuotaContract.WithdrawalRequest[]',
+				name: '',
+				type: 'tuple[]'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [
+			{
+				internalType: 'address',
+				name: 'delegator',
+				type: 'address'
+			},
+			{
+				internalType: 'uint256',
+				name: 'offset',
+				type: 'uint256'
+			},
+			{
+				internalType: 'uint256',
+				name: 'limit',
+				type: 'uint256'
+			}
+		],
+		name: 'getCompletedWrRequests',
+		outputs: [
+			{
+				components: [
+					{
+						internalType: 'uint256',
+						name: 'id',
+						type: 'uint256'
+					},
+					{
+						internalType: 'uint256',
+						name: 'time',
+						type: 'uint256'
+					},
+					{
+						internalType: 'uint256',
+						name: 'amount',
+						type: 'uint256'
+					},
+					{
+						internalType: 'uint256',
+						name: 'unlockTime',
+						type: 'uint256'
+					},
+					{
+						internalType: 'bool',
+						name: 'completed',
+						type: 'bool'
+					}
+				],
+				internalType: 'struct QuotaContract.WithdrawalRequest[]',
+				name: '',
+				type: 'tuple[]'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [
+			{
+				internalType: 'address',
+				name: 'delegator',
+				type: 'address'
+			}
+		],
+		name: 'getNumberOfActiveWithdrawalRequestIDs',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [
+			{
+				internalType: 'address',
+				name: 'delegator',
+				type: 'address'
+			}
+		],
+		name: 'getNumberOfCompletedWithdrawalRequestIDs',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [
+			{
+				internalType: 'address',
+				name: '',
+				type: 'address'
+			}
+		],
+		name: 'getStake',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [
+			{
+				internalType: 'address',
+				name: '',
+				type: 'address'
+			},
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		name: 'getWithdrawalRequest',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: 'id',
+				type: 'uint256'
+			},
+			{
+				internalType: 'uint256',
+				name: 'time',
+				type: 'uint256'
+			},
+			{
+				internalType: 'uint256',
+				name: 'amount',
+				type: 'uint256'
+			},
+			{
+				internalType: 'uint256',
+				name: 'unlockTime',
+				type: 'uint256'
+			},
+			{
+				internalType: 'bool',
+				name: 'completed',
+				type: 'bool'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [
+			{
+				internalType: 'address',
+				name: 'delegator',
+				type: 'address'
+			},
+			{
+				internalType: 'uint256',
+				name: 'wrID',
+				type: 'uint256'
+			}
+		],
+		name: 'hasActiveWithdrawalRequestId',
+		outputs: [
+			{
+				internalType: 'bool',
+				name: '',
+				type: 'bool'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
+	},
+	{
+		inputs: [],
+		name: 'holdTime',
+		outputs: [
+			{
+				internalType: 'uint256',
+				name: '',
+				type: 'uint256'
+			}
+		],
+		stateMutability: 'view',
+		type: 'function'
 	}
 ] as const;
 

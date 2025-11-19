@@ -19,7 +19,7 @@ const vinuchainMainnet = defineChain({
 });
 
 // Quota Contract Address (Payback Contract for staking data)
-const QUOTA_CONTRACT_ADDRESS = "0x9D6Aa03a8D4AcF7b43c562f349Ee45b3214c3bbF" as `0x${string}`;
+const QUOTA_CONTRACT_ADDRESS = "0x1c4269fbbd4a8254f69383eef6af720bcd0acda6" as `0x${string}`;
 
 const contract = getContract({
 	client: client,
