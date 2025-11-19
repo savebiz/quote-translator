@@ -194,7 +194,7 @@ function QuotaCalculator() {
 	} = useReadContract({
 		contract,
 		method: "getStake",
-		params: [walletAddress, validatorId] as any,
+		params: [walletAddress],
 		queryOptions: {
 			enabled: !!walletAddress && walletAddress !== "0x0000000000000000000000000000000000000000",
 			retry: 0,
